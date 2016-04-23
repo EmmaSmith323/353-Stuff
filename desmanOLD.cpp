@@ -134,7 +134,6 @@ struct fdInfo {
 	
 	std::mutex logfileMutex;
 	std::mutex totalTrafficMutex;
-	std::mutex bufferMutex;
 	
 	int totalPackets = 0;
 	int totalBytes = 0;
@@ -223,7 +222,7 @@ where
 
 	
 	for (currUID = 1; currUID <= numWatchdogs; currUID++) {
-		//printf("connect loop \n");fflush(stdout);
+		printf("connect loop \n");fflush(stdout);
 		
 		char wd [1000];
 		struct sockaddr_storage sa;
@@ -234,28 +233,27 @@ where
 		}
 	
 		inet_ntop(sa.ss_family, get_in_addr((struct sockaddr *)&sa), wd, sizeof wd);
-       // printf("server: got connection from %s\n", wd);fflush(stdout);		fflush(stdout);
+        printf("server: got connection from %s\n", wd);fflush(stdout);		fflush(stdout);
 					
 					
 		fdInfo* newFD = new fdInfo(session_fd, currUID, wd);
 		fdInfos->push_back(newFD);
 		
 	}
-
-	
-	fflush(stdout);
-	//Kick off threads & go to handling
-	for(unsigned int i = 0; i < fdInfos->size(); i++) {
-		//printf(" creating thread for monitoring watchdog! fd: %d  UID: %d  \n", fdInfos->at(i)->session_fd,fdInfos->at(i)->UID );
-		fflush(stdout);
-		pthread_create((pthread_t*)&(fdInfos->at(i)->thread), NULL , &handle_watchdog, fdInfos->at(i));
-	}
 	sleep(1);
-	
 	strcpy(log, "All watchdogs connected… \n");
 	fprintf(logfile, "%s", log);
 	printf("%s", log);
 	fflush(logfile);
+	
+	
+	fflush(stdout);
+	//Kick off threads & go to handling
+	for(unsigned int i = 0; i < fdInfos->size(); i++) {
+		printf(" creating thread for monitoring watchdog! fd: %d  UID: %d  \n", fdInfos->at(i)->session_fd,fdInfos->at(i)->UID );
+		fflush(stdout);
+		pthread_create((pthread_t*)&(fdInfos->at(i)->thread), NULL , &handle_watchdog, fdInfos->at(i));
+	}
 	
 	
 	logfileMutex.lock();
@@ -322,11 +320,8 @@ void* handle_watchdog(void* args) {
 		
 		while(1) {
 			char buffer[1000];
-			int reportNum, pack, byte, flo;
-			char IP[100];
-			bool alert = false;;
+			int pack, byte, flo;
 			
-			bufferMutex.lock();
 			if (recv(thisFD->session_fd, buffer, 1000, 0) <= 0) {
 					printf(" num bytes <= 0 \n");
 					fflush(stdout);
@@ -337,57 +332,38 @@ void* handle_watchdog(void* args) {
 			} else {
 				
 				printf("from buffer:   %s \n", buffer);
+				printf("\nend Buffer\n");
 				fflush(stdout);
 				
 				
-				//2 types of reports!
-				//report <reportnumber> <packets> <bytes> <flows>
-				//alert report <reportnumber> <packets> <bytes> <flows> <IP>
-				
 				std::string::size_type sz;  
-				if(buffer[0] == 'a') {
-					alert = true;
-					char* report = strtok (buffer," ");
-					report = strtok (NULL," "); //alert
-					report = strtok (NULL," "); //report
-					reportNum = std::stoi(report, &sz);
-					report = strtok (NULL," "); 
-					pack = std::stoi(report, &sz);
-					report = strtok (NULL," ");
-					byte = std::stoi(report, &sz);;
-					report = strtok (NULL," ");
-					flo = std::stoi(report, &sz);
-					report = strtok (NULL," ");
-					strcpy(IP, report);
-					
-				} else if (buffer[0] == 'r') {
-					char* report = strtok (buffer," ");
-					report = strtok (NULL," "); //report
-					reportNum = std::stoi(report, &sz);
-					report = strtok (NULL," ");
-					pack = std::stoi(report, &sz);
-					report = strtok (NULL," ");
-					byte = std::stoi(report, &sz);
-					report = strtok (NULL," ");
-					flo = std::stoi(report, &sz);
-
-					
-				} else {
-					printf("something is wrong");
-					fflush(stdout);
-				}
 				
-			bufferMutex.unlock();
+				char* report = strtok (buffer," ");
+				report = strtok (NULL," ");
+				report = strtok (NULL," ");
+				pack = std::stoi(report, &sz);
+				fprintf(stdout, "%d",  pack);
+				fflush(stdout);
+				report = strtok (NULL," ");
+				byte = std::stoi(report, &sz);
+				fprintf(stdout, "%d", byte);
+				fflush(stdout);
+				report = strtok (NULL," ");
+				flo = std::stoi(report, &sz);
+				fprintf(stdout, "%d", flo);
+				fflush(stdout);
+				// split[0] is report
+				// split[1] is report number
 				
+				
+				
+				
+				fprintf(stdout, "what?  %d %d %d \n",  pack, byte, flo);
+				fflush(stdout);	
 					
 				logfileMutex.lock();
-				if(alert) {
-					fprintf(logfile, "Recieved alert report UID %d %d %d %d %d %s ", thisFD->UID, reportNum, pack, byte, flo, IP);
-					fprintf(stdout, "Recieved alert report UID %d %d %d %d %d %s ", thisFD->UID, reportNum, pack, byte, flo, IP);
-				} else {
-					fprintf(logfile, "Recieved report UID %d %d %d %d %d \n", thisFD->UID, reportNum, pack, byte, flo);
-					fprintf(stdout, "Recieved report UID %d %d %d %d %d \n", thisFD->UID, reportNum, pack, byte, flo);	
-				}
+				fprintf(logfile, "Recieved report UID %d %d %d %d \n", thisFD->UID, pack, byte, flo);
+				fprintf(stdout, "Recieved report UID %d %d %d %d \n", thisFD->UID, pack, byte, flo);
 				fflush(logfile);
 				fflush(stdout);
 				logfileMutex.unlock();

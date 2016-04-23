@@ -290,6 +290,7 @@ where
 	//setup singal to handle ctrl c.
 	//The SIGINT (“program interrupt”) signal is sent when the user types the INTR character (normally C-c). 
 	signal(SIGINT, handleCtrlC);
+	
 	if(reading == true) {
 		//open offline - only do for read
 		handle = pcap_open_offline(pcapFilename, errbuf);

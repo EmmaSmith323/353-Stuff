@@ -134,20 +134,6 @@ struct Flow {
 		return false;
 	}
 };
-
-struct Dest {
-		char IP[100];
-		int maxBytes;
-		int maxFlows;
-		int maxPackets;
-		Dest(char ip[], int byte, int pack, int flow) {
-			strcpy(IP, ip);
-			maxBytes = byte;
-			maxPackets = pack;
-			maxFlows = flow;
-		}
-		
-};
 	
 	
 	
@@ -172,18 +158,6 @@ struct Dest {
 	time_t timeDelta;
 	time_t timeNow;
 	bool first = true;
-	
-	unsigned int lastFlow = 0;
-	int lastPack = 0;
-	int lastByte = 0;
-	bool flowAlert = false;
-	bool packAlert = false;
-	bool byteAlert = false;
-	
-	char alertIP[100];
-
-	std::vector<Dest*>* destInfo;
-	
 
 	bool reading = false;
 	bool interface = false;
@@ -243,7 +217,6 @@ where
 	}//end of for that loops through cmd line args
 	
 	flowInfo = new std::vector<Flow*>();
-	destInfo = new std::vector<Dest*>();
 	numBytes = 0;
 	numPackets = 0;
 	
@@ -293,6 +266,8 @@ where
 		}
 	}
 	// get UID
+	
+	//TODO FIX THIS   myUID = atoi(buffer[4]);
 	logfileMutex.lock();
 	strcpy(log, "Received ");
 	strcat(log, buffer);
@@ -396,13 +371,100 @@ void processPacket(u_char *args,  const struct pcap_pkthdr *pkthdr, const u_char
 		dstPort = tcpHead->th_dport;
 	}
 	
+	if(reading == true) { //based of of timestamps!!!
+		if(pkthdr->ts.tv_sec > timePeriod.tv_sec) { //next time period
+			logfileMutex.lock();
+			char numChar [100]; 
+			char rLog [10000];
+			
+			strcpy(rLog, "report "); //report
+			sprintf(numChar, "%d", currReport);
+			strcat(rLog, numChar); //reportnumber
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", numPackets);
+			strcat(rLog, numChar); // packets
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", numBytes);
+			strcat(rLog, numChar); //bytes
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", flowInfo->size());
+			strcat(rLog, numChar); //flows	
+			strcat(rLog, "\n \0");
+			//Send to desman
+			sleep(1);
+			send(clientSocket, rLog, strlen( rLog), 0);
+			//std::cin.get();
+			//Log to file
+			fprintf(logfile, "%s", rLog);
+			printf("%s", rLog);
+			fflush(logfile);
+			fflush(stdout);
+			logfileMutex.unlock();
+
+			//reset values
+			numBytes = 0;
+			numPackets = 0;
+			flowInfo->clear();
+			currReport++;
 	
+			timePeriod.tv_sec++;
+		}
+	} else { // based on timer, do nothing?!?!?!
+	printf("inter check time  \n");
+	
+	time(&timeNow);
+	struct tm * timeinfo;
+	
+	timeinfo = localtime ( &timeDelta );
+	printf ( "timedelta : %s", asctime (timeinfo) );
+    timeinfo = localtime ( &timeNow );
+	printf ( "timenow : %s", asctime (timeinfo) );
+	printf("%f  \n",  difftime(timeNow,timeDelta));
+	fflush(stdout);
+		if(  difftime(timeNow,timeDelta) >= 60) {
+			logfileMutex.lock();
+			char numChar [100]; 
+			char rLog [10000];
+			
+			strcpy(rLog, "report "); //report
+			sprintf(numChar, "%d", currReport);
+			strcat(rLog, numChar); //reportnumber
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", numPackets);
+			strcat(rLog, numChar); // packets
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", numBytes);
+			strcat(rLog, numChar); //bytes
+			strcat(rLog, " ");
+			sprintf(numChar, "%d", flowInfo->size());
+			strcat(rLog, numChar); //flows	
+			strcat(rLog, "\n \0");
+			//Send to desman
+			send(clientSocket, rLog, strlen( rLog), 0);
+			//std::cin.get();
+			//Log to file
+			fprintf(logfile, "%s", rLog);
+			printf("%s", rLog);
+			fflush(logfile);
+			fflush(stdout);
+			logfileMutex.unlock();
+
+			//reset values
+			numBytes = 0;
+			numPackets = 0;
+			flowInfo->clear();
+			currReport++;
+	
+			timeDelta = timeNow;
+		}
+	}
+
 	//add to the numPackets and numBytes
 	numPackets++;
 	numBytes += length;
 	//check flow, and add if needed
 	bool duplicate = false;
-	struct Flow *newFlow = new Flow(srcIp, dstIp, srcPort, dstPort, protocol, -1); 	
+	struct Flow *newFlow = new Flow(srcIp, dstIp, srcPort, dstPort, protocol, -1); 
 	for(unsigned int i = 0; i < flowInfo->size(); i++) {
 		if(&flowInfo->at(i) == &newFlow) {
 			duplicate = true;
@@ -413,276 +475,7 @@ void processPacket(u_char *args,  const struct pcap_pkthdr *pkthdr, const u_char
 		newFlow->flowIndex = flowInfo->size() + 1;
 		flowInfo->push_back(newFlow);		
 	}
-	
-	char thisDstIP[100];
-	strcpy(thisDstIP, inet_ntoa(dstIp));
-	bool dupe = false;
-	struct Dest* newDest = new Dest(thisDstIP, length, 1, 1);
-	for(unsigned int i = 0; i < destInfo->size(); i++) {
-		if(&destInfo->at(i) == &newDest) {
-			dupe = true;
-			destInfo->at(i)->maxBytes += length;
-			destInfo->at(i)->maxPackets += 1;
-			if(!duplicate) { destInfo->at(i)->maxFlows += 1; }
-			break;
-		}
-	}
-	if(dupe == false) {
-		destInfo->push_back(newDest);
-	}
 
-	
-	if(reading == true) { //based of of timestamps!!!
-		if(pkthdr->ts.tv_sec > timePeriod.tv_sec) { //next time period
-		
-			if(numPackets >= 3*lastPack && lastPack!=0) {
-				packAlert = true;
-			}
-			if(numBytes >= 3*lastByte && lastByte!=0) {
-				byteAlert = true;
-			}
-			if(flowInfo->size() >= 3*lastFlow && lastFlow!=0) {
-				flowAlert = true;
-			}
-			
-			logfileMutex.lock();
-			char rLog [10000];
-			char numChar[100];
-			
-			if(!flowAlert && !byteAlert && !packAlert) {			
-				strcpy(rLog, "report "); //report
-				sprintf(numChar, "%d", currReport);
-				strcat(rLog, numChar); //reportnumber
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numPackets);
-				strcat(rLog, numChar); // packets
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numBytes);
-				strcat(rLog, numChar); //bytes
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", flowInfo->size());
-				strcat(rLog, numChar); //flows	
-				strcat(rLog, "\n \0");
-			} else {
-				//First Logfile!
-				//alert <type>
-				strcpy(rLog, "alert ");
-				if(byteAlert) {
-					strcat(rLog, "byte ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxBytes > max) {
-							max = destInfo->at(i)->maxBytes;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}				
-				if(packAlert) {
-					strcat(rLog, "packet ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxPackets > max) {
-							max = destInfo->at(i)->maxPackets;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}
-				if(flowAlert) {
-					strcat(rLog, "flow ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxFlows > max) {
-							max = destInfo->at(i)->maxFlows;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}
-				strcat(rLog, "\n \0");
-				fprintf(logfile, "%s", rLog);
-				printf("%s", rLog);
-				fflush(logfile);
-				fflush(stdout);
-				
-				//message & second logfile
-				//alert report <reportnumber> <packets> <bytes> <flows> <IP>
-				strcpy(rLog, "alert ");
-				strcat(rLog, "report ");
-				sprintf(numChar, "%d", currReport);
-				strcat(rLog, numChar); //reportnumber
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numPackets);
-				strcat(rLog, numChar); // packets
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numBytes);
-				strcat(rLog, numChar); //bytes
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", flowInfo->size());
-				strcat(rLog, numChar); //flows	
-				strcat(rLog, " ");
-				strcat(rLog, alertIP); //destIP
-				strcat(rLog, "\n \0");
-				
-				}	
-	
-			//Send to desman
-			sleep(1);
-			send(clientSocket, rLog, strlen( rLog), 0);
-			//Log to file
-			fprintf(logfile, "%s", rLog);
-			printf("%s", rLog);
-			fflush(logfile);
-			fflush(stdout);
-			logfileMutex.unlock();
-
-			//reset values
-			lastByte = numBytes;
-			lastPack = numPackets;
-			lastFlow = flowInfo->size();
-			numBytes = 0;
-			numPackets = 0;
-			flowInfo->clear();
-			destInfo->clear();
-			currReport++;
-			
-			flowAlert = false;
-			packAlert = false;
-			byteAlert = false;
-
-	
-			timePeriod.tv_sec++;
-		}
-	} else { // based on timer
-	//TODO MAKE CHANGES FROM ^ TO THIS AS WELL FOR ALERTS!!!!!!!!!!!!!!!!!!!!!!!
-	/*printf("inter check time  \n");
-	
-	time(&timeNow);
-	struct tm * timeinfo;
-	
-	timeinfo = localtime ( &timeDelta );
-	printf ( "timedelta : %s", asctime (timeinfo) );
-    timeinfo = localtime ( &timeNow );
-	printf ( "timenow : %s", asctime (timeinfo) );
-	printf("%f  \n",  difftime(timeNow,timeDelta));
-	fflush(stdout);*/
-		if(  difftime(timeNow,timeDelta) >= 1) {
-			if(numPackets >= 3*lastPack && lastPack!=0) {
-				packAlert = true;
-			}
-			if(numBytes >= 3*lastByte && lastByte!=0) {
-				byteAlert = true;
-			}
-			if(flowInfo->size() >= 3*lastFlow && lastFlow!=0) {
-				flowAlert = true;
-			}
-			
-			logfileMutex.lock();
-			char rLog [10000];
-			char numChar[100];
-			
-			if(!flowAlert && !byteAlert && !packAlert) {			
-				strcpy(rLog, "report "); //report
-				sprintf(numChar, "%d", currReport);
-				strcat(rLog, numChar); //reportnumber
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numPackets);
-				strcat(rLog, numChar); // packets
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numBytes);
-				strcat(rLog, numChar); //bytes
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", flowInfo->size());
-				strcat(rLog, numChar); //flows	
-				strcat(rLog, "\n \0");
-			} else {
-				//First Logfile!
-				//alert <type>
-				strcpy(rLog, "alert ");
-				if(byteAlert) {
-					strcat(rLog, "byte ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxBytes > max) {
-							max = destInfo->at(i)->maxBytes;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}				
-				if(packAlert) {
-					strcat(rLog, "packet ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxPackets > max) {
-							max = destInfo->at(i)->maxPackets;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}
-				if(flowAlert) {
-					strcat(rLog, "flow ");
-					int max = 0;
-					for(unsigned int i = 0; i < destInfo->size(); i++) {
-						if(destInfo->at(i)->maxFlows > max) {
-							max = destInfo->at(i)->maxFlows;
-							strcpy(alertIP , destInfo->at(i)->IP);
-						}
-					}
-				}
-				strcat(rLog, "\n \0");
-				fprintf(logfile, "%s", rLog);
-				printf("%s", rLog);
-				fflush(logfile);
-				fflush(stdout);
-				
-				//message & second logfile
-				//alert report <reportnumber> <packets> <bytes> <flows> <IP>
-				strcpy(rLog, "alert ");
-				strcat(rLog, "report ");
-				sprintf(numChar, "%d", currReport);
-				strcat(rLog, numChar); //reportnumber
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numPackets);
-				strcat(rLog, numChar); // packets
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", numBytes);
-				strcat(rLog, numChar); //bytes
-				strcat(rLog, " ");
-				sprintf(numChar, "%d", flowInfo->size());
-				strcat(rLog, numChar); //flows	
-				strcat(rLog, " ");
-				strcat(rLog, alertIP); //destIP
-				strcat(rLog, "\n \0");
-				
-			}	 //end of else, alert black
-
-			//Send to desman
-			send(clientSocket, rLog, strlen( rLog), 0);
-			//Log to file
-			fprintf(logfile, "%s", rLog);
-			printf("%s", rLog);
-			fflush(logfile);
-			fflush(stdout);
-			logfileMutex.unlock();
-
-			//reset values
-			lastByte = numBytes;
-			lastPack = numPackets;
-			lastFlow = flowInfo->size();
-			numBytes = 0;
-			numPackets = 0;
-			flowInfo->clear();
-			destInfo->clear();
-			currReport++;
-			
-			flowAlert = false;
-			packAlert = false;
-			byteAlert = false;
-	
-			timeDelta = timeNow;
-
-			
-		}	//end of if for checking 1 sec passed
-		
-	} // end of else for interface timing
 	
 };
 
